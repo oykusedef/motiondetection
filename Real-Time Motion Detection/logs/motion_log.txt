@@ -1,0 +1,15 @@
+Motion Detection Log
+===================
+
+Motion Detected - 2025-05-19 00:06:09
+Motion Detected - 2025-05-19 00:06:09
+Motion Ended - Duration: 0.03 seconds
+--------------------------------------------------
+Motion Detected - 2025-05-19 00:06:10
+Motion Detected - 2025-05-19 00:06:11
+Motion Ended - Duration: 1.78 seconds
+--------------------------------------------------
+Motion Detected - 2025-05-19 00:06:12
+Motion Detected - 2025-05-19 00:06:12
+Motion Ended - Duration: 0.20 seconds
+--------------------------------------------------
