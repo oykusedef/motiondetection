@@ -12,7 +12,8 @@
             </div>
             <div class="card-body">
                 <div class="ratio ratio-16x9 d-flex align-items-center justify-content-center" style="background:#f5f6fa;">
-                    <img src="{{ url_for('video_feed') }}" alt="Live Feed" style="max-width:100%; max-height:100%; border-radius:8px; background:#222;" />
+                    <img src="{{ url_for('video_feed') }}" alt="Live Feed" style="max-width:100%; max-height:100%; border-radius:8px; background:#222;"
+                         onerror="this.onerror=null; this.src=''; this.parentElement.innerHTML='<div class=\'text-center text-muted\'><i class=\'fas fa-exclamation-triangle fa-2x mb-2\'></i><p>Unable to load video feed. Please try refreshing the page.</p></div>';" />
                 </div>
             </div>
         </div>

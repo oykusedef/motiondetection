@@ -36,6 +36,9 @@ class MotionDetector:
         self.motion_start_time = None
         self.current_recording_filename = None
         self.frame_written = False
+        self.min_recording_duration = 5  # minimum recording duration in seconds
+        self.recording_cooldown = 2  # seconds to wait before starting a new recording
+        self.last_recording_end_time = 0
         
         # Create directories if they don't exist
         if not os.path.exists('recordings'):
@@ -68,73 +71,101 @@ class MotionDetector:
                 f.write("-" * 50 + "\n")
     
     def start_recording(self):
-        if not self.recording:
+        current_time = time.time()
+        if not self.recording and (current_time - self.last_recording_end_time) >= self.recording_cooldown:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"motion_{timestamp}.mp4"
             filepath = os.path.join('recordings', filename)
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            
+            # Use H.264 codec for better compatibility
+            fourcc = cv2.VideoWriter_fourcc(*'avc1')  # H.264 codec
             fps = 20.0
             frame_size = (640, 480)  # Adjust based on your camera
-            self.output_video = cv2.VideoWriter(filepath, fourcc, fps, frame_size)
-            self.recording = True
-            self.motion_start_time = datetime.now()
-            self.log_motion_event(start_time=self.motion_start_time)
-            global motion_status
-            motion_status['motion'] = True
-            motion_status['last_motion'] = self.motion_start_time.strftime('%Y-%m-%d %H:%M:%S')
-            self.current_recording_filename = filename
-            self.frame_written = False
+            
+            try:
+                self.output_video = cv2.VideoWriter(filepath, fourcc, fps, frame_size)
+                if self.output_video.isOpened():
+                    self.recording = True
+                    self.motion_start_time = datetime.now()
+                    self.log_motion_event(start_time=self.motion_start_time)
+                    global motion_status
+                    motion_status['motion'] = True
+                    motion_status['last_motion'] = self.motion_start_time.strftime('%Y-%m-%d %H:%M:%S')
+                    self.current_recording_filename = filename
+                    self.frame_written = False
+                else:
+                    print(f"Failed to open video writer for {filepath}")
+            except Exception as e:
+                print(f"Error starting recording: {str(e)}")
     
     def stop_recording(self):
         if self.recording:
-            self.output_video.release()
-            self.recording = False
-            self.output_video = None
-            self.log_motion_event(end_time=datetime.now(), start_time=self.motion_start_time)
-            global motion_status
-            motion_status['motion'] = False
-            # Delete file if no frames were written or file is too small
-            filepath = os.path.join('recordings', self.current_recording_filename)
             try:
-                if not self.frame_written or os.path.getsize(filepath) < 100*1024:  # less than 100KB
-                    os.remove(filepath)
-            except Exception:
-                pass
-            self.current_recording_filename = None
-            self.frame_written = False
+                # Ensure minimum recording duration
+                current_time = datetime.now()
+                elapsed_time = (current_time - self.motion_start_time).total_seconds()
+                
+                if elapsed_time < self.min_recording_duration:
+                    # Wait until minimum duration is reached
+                    time.sleep(self.min_recording_duration - elapsed_time)
+                
+                self.output_video.release()
+                self.recording = False
+                self.output_video = None
+                self.log_motion_event(end_time=datetime.now(), start_time=self.motion_start_time)
+                global motion_status
+                motion_status['motion'] = False
+                
+                # Delete file if no frames were written or file is too small
+                filepath = os.path.join('recordings', self.current_recording_filename)
+                try:
+                    if not self.frame_written or os.path.getsize(filepath) < 100*1024:  # less than 100KB
+                        os.remove(filepath)
+                except Exception as e:
+                    print(f"Error handling recording file: {str(e)}")
+                
+                self.current_recording_filename = None
+                self.frame_written = False
+                self.last_recording_end_time = time.time()
+            except Exception as e:
+                print(f"Error stopping recording: {str(e)}")
     
     def process_frame(self, frame):
-        # Apply background subtraction
-        fg_mask = self.background_subtractor.apply(frame)
-        
-        # Apply noise reduction
-        kernel = np.ones((5,5), np.uint8)
-        fg_mask = cv2.erode(fg_mask, kernel, iterations=1)
-        fg_mask = cv2.dilate(fg_mask, kernel, iterations=2)
-        
-        # Find contours of moving objects
-        contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        # Check for significant motion
-        motion_detected = False
-        for contour in contours:
-            if cv2.contourArea(contour) > 500:  # Filter small contours
-                motion_detected = True
-                (x, y, w, h) = cv2.boundingRect(contour)
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-        
-        # Handle motion detection events
-        current_time = time.time()
-        if motion_detected:
-            if not self.motion_detected:
-                self.motion_detected = True
-                self.start_recording()
-        else:
-            if self.motion_detected:
-                self.motion_detected = False
-                self.stop_recording()
-        
-        return frame, fg_mask
+        try:
+            # Apply background subtraction
+            fg_mask = self.background_subtractor.apply(frame)
+            
+            # Apply noise reduction
+            kernel = np.ones((5,5), np.uint8)
+            fg_mask = cv2.erode(fg_mask, kernel, iterations=1)
+            fg_mask = cv2.dilate(fg_mask, kernel, iterations=2)
+            
+            # Find contours of moving objects
+            contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # Check for significant motion
+            motion_detected = False
+            for contour in contours:
+                if cv2.contourArea(contour) > 300:  # Reduced threshold for better sensitivity
+                    motion_detected = True
+                    (x, y, w, h) = cv2.boundingRect(contour)
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            
+            # Handle motion detection events
+            current_time = time.time()
+            if motion_detected:
+                if not self.motion_detected:
+                    self.motion_detected = True
+                    self.start_recording()
+            else:
+                if self.motion_detected:
+                    self.motion_detected = False
+                    self.stop_recording()
+            
+            return frame, fg_mask
+        except Exception as e:
+            print(f"Error processing frame: {str(e)}")
+            return frame, np.zeros_like(frame)
 
 # User Model
 class User(UserMixin, db.Model):
@@ -199,8 +230,17 @@ def generate_frames():
 @app.route('/video_feed')
 @login_required
 def video_feed():
-    return Response(generate_frames(),
+    if not current_user.is_authenticated:
+        return Response('Unauthorized', status=401)
+    
+    response = Response(generate_frames(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET'
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 # Routes
 @app.route('/')
@@ -312,7 +352,14 @@ def play_recording(filename):
 @app.route('/recordings/raw/<path:filename>')
 @login_required
 def serve_recording(filename):
-    return send_from_directory('recordings', filename, mimetype='video/mp4')
+    try:
+        return send_from_directory('recordings', filename, 
+                                 mimetype='video/mp4',
+                                 as_attachment=False,
+                                 conditional=True)
+    except Exception as e:
+        print(f"Error serving recording: {str(e)}")
+        return "Error serving video", 500
 
 @app.route('/motion_status')
 @login_required
